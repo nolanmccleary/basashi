@@ -1,55 +1,90 @@
-Basashi uses two data types, words and bit fields. Collectively they are referred to as Rings. When converting between words and bits, words will automatically pad to the next full word, bit fields will automatically truncate to the last set bit. 
+Basashi uses three data types, words, bitfields, and literals. Collectively they are referred to as Rings. Words and bitfileds are explicitly specified via bit and word keywords, literals are implicit. When converting between types, words will automatically pad to the next full word and raise a compile error is the target ring is too large, bitfields will automatically raise a compile error if the target ring mapping does not match the number of bits as the field. 
 Key rules:
 
-1. Rings must spawn from literals or other Rings that have a lineage tracing back to literals. Literal size must be leq ring size. Literals can either be padded e.g. word[3] z = ['1', 'b', 'c'] or unpadded e.g. word z = '1bc'. Padded init will zero all unassigned words in buffer e.g. word[5] r = ['a', 'b', 'c'] will zero last two words.
+1. Rings must spawn from literals or other Rings that have a lineage tracing back to literals. Literal size must be leq ring size. Literals can either be padded e.g. word[3] z = ['1', 'b', 'c'] or unpadded e.g. word z = '1bc'. Padded init will zero all unassigned words in buffer e.g. word[5] r = ['a', 'b', 'c'] will zero last two words. All fills from LSB by default for both words and bitfields.
 
-2. Literals are word buffers in memory (at least one word allocated contiguously)
+2. Literals are word buffers in memory (at least one word allocated contiguously).
 
 3. All rings are immutable e.g. k += 'abc' is not legal but f = k + 'abc' is legal.
 
-4. Word to field -> Field will capture first n bits from word (n LSB), bit range must be leq total bit size of word.
+4. Word to field -> n-Field must map to n bits of a word, implicit mapping via fill from LSB, explicit mapping via slice notation (see 24). Unaligned mappings will raise a compile error.
 
-5. Field to word -> Words will pad to next word boundary
+5. Field to word -> Words will pad to next word boundary. Oversized fields will raise a compile error.
 
-6. Adding rings together: Can only add rings of the same type, explicit casts must be made when adding two rings of different types, cast depends on target type. 
+6. Adding rings together: Can only add rings of the same type, explicit casts must be made when adding two rings of different types, cast depends on target type. + operator by default concatenates rings togetether while * replicates across some range dictated by the non-ring term (see 8.)
 
-7. Adding literals: Literals can be added to both fields provided they fit within the valid range of values. Like in 1., literals can be added in either a padded or unpadded manner e.g. 'abc' vs ['a', 'b', 'c'] (chars via utf-8)
+7. Adding literals: Literals can be added to both words and bitfileds provided they fit within the valid range of values. Like in 1., literals can be added in either a padded or unpadded manner e.g. 'abc' vs ['a', 'b', 'c'] (chars via utf-8).
 
-8. Multiplication by constants: new rings can be created by multiplying rings by some constant, distributive property holds e.g. d = c(a + b) = ca + cb, all sizing must be appropriate.
+8. Multiplication by constants: new rings can be created by multiplying rings by some numeric constant e.g. a literal or int(<word>), distributive property holds e.g. d = c(a + b) = ca + cb. All sizing must be appropriate.
 
 9. Through 1 and 8, all ring sizes are known at compile time. Sizing errors will cause compile errors.
 
-10. Ring indexing: Standard indexing via ring[i] and ring[start : end] is permitted. Ring[i] will return a singular instance of the ring type mapping to the vlaue at that location. sub-rings will be of the same type as their parent ring. Slicing is inclusive-inclusive and hi must be > lo.
+10. Ring indexing: Standard indexing via ring[i] or ring[start : end] or ring[start1: end1, start2: end2 <etc>] is permitted. Ring[i] will return a singular instance of the ring type mapping to the value at that location. Sub-rings will be of the same type as their parent ring. Slicing is inclusive-exclusive and hi must be > lo.
 
 11. Type expression: Word buffers can express their values through the following data types str (word buffers), float (64 or bits), int (64 bits), uint. Expressional arithmetic defined by type e.g. add_int(x, y), add_uint(x, y), mul_float(x, y) will create a new word with a bit value defined by the operation context. 
 Strings do not posess any expressional arithmetic properties, adding strings will simply concatenate them together as per 6. Overflows will trap by default but this should not happen because the compiler ensures that sizing is always appropriate.
 
-12. Standard bitwise ops via bitfields/literals work just like in C.
+12. Standard bitwise ops via bitfields/literals e.g. & | ^ etc.
 
-13. Pointers are just words e.g. word* r = &k; word** y = &r; All the star is for is to keep track of pointer's place in reference hierarchy. *p will return an immutable copy of the pointer. Must use mut on a pointer to allow dereffed value to be set (only way to mutate rings, not recommended in most cases) e.g. mut *p = 5; or mut 5; p = 5;
+13. Pointers are just words e.g. word* r = &k; word** y = &r; word[f] = ['a', k]; word[2]** e = &f. All the star is for is to keep track of pointer's place in reference hierarchy. Must use mut on a ring to allow value to be changed via its dereffed pointer (only way to mutate rings, not recommended in most cases) e.g. mut word p = 5; word* k = &p; *k = 7. Mut word* q = &p would imply that q is mutable and able to be changed by dereffind the (**) pointer. 
+Mut is only possible for normal words and bitfields, not literals or function pointers.
 
-14. Logical and arithmetic shifting is just like in C, sign-extend will happen if int() or float() cast is applied to operand word
+14. Logical and arithmetic shifting is just like in C, sign-extend will happen if int() or float() cast is applied to operand word. If uint is specified or nothing is specified, there will by default be no sign-extension. The logical/arithmetic shift is done via << or >>. There is alos a ring shift which loops the bits back on itself e.g. bit zero is moved to MSB during right-shift, via <<< or >>>.
 
-15. Function syntax: func word[3] my_func{...} returns a word[3] value. my_func itself is a word*. Function pointers cannot be mutated and neither can their internal variables.
+15. Function syntax: func my_func -> word[3] {...} returns a word[3] value. my_func itself is a word*. Function pointers cannot be mutated and neither can their internal variables. This is checked by the compiler.
 
-16. loop syntax same as C e.g. for(word i = 0; i < 69; i++). However it will convert to the actual functional implementation of that logic under the hood i.e. it won't actually modify i in place.
+16. loop syntax same as C e.g. for(word i = 0; i < 69; i++). However, it will convert to the actual functional implementation of that logic under the hood i.e. it won't actually modify i in place.
 
-17. Everything is little-endain by default.
+17. Everything is little-endian by default.
 
 18. Comment syntax on a per-line basis via // (for now)
 
 19. Operator precedence the same as C.
 
+20. ring add order: cc1 = 'a' + ['b'] + [123] = ['a', 'b', 123]; cc2 = ['b'] + 'a' + 123 = ['b', 'a'123];
+
+21. Literal substitution: will automatically fill to lowest smallest buffer size that holds full Literal.
+
+22. Arbitrary chaining of expressional add/mul. only two terms for sub and div i.e.
+word add_out = add_int(123, 345, 456); //123 + 345 + 456
+word sub_out = sub_int(123, 345); //int subtraction so twos complement negative representation of 64-bit integer will lie inside sub_out. 
+word add_out = add_int(124, 111, 221)
+word[2] add_out = add_int(113, 112, [11, 3]) //[11, 3] is represented as 128-bit signed int which is added to 113 and 112 inside add_out. Note that floats can only be 64 bits
+bit[<x>] add_out = bit(add_int(113, 112, [11, 3]))
+
+23. Over/underflow causes compile error by default unless wraparound (wrap) or saturate (sat) is specified i.e.
+word add_out = add_int(5, 2^64, 30); will fail unless we do something like
+word add_out = wrap add_int(5, 2^64, 30);
+
+24. Bitfields less than their assigned ring can access larger members provided they define the mapping exiplictly for each bit via standard slicer notation e.g. bit[8] vec = targ_word[0:1, 10:18]
+
+25. Ring formatting: rings can also be specified as follows:
+word[4] x = [a, b, c, d] //this of course assumes a, b, c, and d are all size-1 words. standard typing and sizing specifications apply here just like they do in 6.
+
+
 In other words:
 1. All variables immutable
 2. Literals can be either padded or unpadded
-3. Two data types: Words and bitfields. Words autopad when assigned a value that is too small, break compilation when value is too large. All data is immutable by default. 
+3. Three data types: Words, literals, and bitfields. Words autopad when assigned a value that is too small, break compilation when value is too large. Bitfields break by default when value does not fit bitfield bitsize, mapping/padding must be added explicitly in this case. All data is immutable by default. 
 4. Addition and multiplication can either be done in the ring context e.g. concat/replicate or the expression context e.g. add ints/multiply floats. Subtraction and division must be in the expression contatext.
+
+
+In other other words:
+Basashi executes on the contextual representation of explicitly defined memory flow. 
+
+The purpose:
+Basashi is designed to help you fit and run the entire machine inside your head.
+
+It does this by being:
+A pseudo-functional frontend for a systems-level backend.
+
+What this (hopefully) results in:
+A system-level runtime that an intelligent system can internally represent and reason about as a self-validating, graph-structured model of low-level computation.
 
 
 
 Bitwise Sizing:
-Bit fields: 1xn where n is number of bits
+Bitfields: 1xn where n is number of bits
 Word: 64xn where n is number of words
 Utf-8 Literals: (n UTF-8 Bytes) * 8
 
@@ -59,39 +94,4 @@ UTF-8: 'DEAD_BEEF'
 Hex: 0xFF5
 Binary: 3'b101
 Decimal: 12345
-
-Some exmaples:
-
-word x = 'a'; // 26, 0xFF 0b110 (zero pads by default)
-
-bit y = 0b1;
-
-bit[18] z = 'r'; //or some number (must fit inside bit range)
-
-bit[3] q = 0b101;
-
-bit[3] k = x; //grabs first 3 bits of x (access range must fit inside word)
-
-word[3] v = [a, b, c]; //fits a, b, c into one word section each. Commas delineate word fille e.g. (same for [1, 0xFF, 'j']), each fill zone must fit inside word
-
-word[3] w = 'abc'; //No-pad fill, segment must fit inside field
-
-bit[195] r = bit(v) + q; 
-
-word[4] g = v + word(q);
-
-g == word(r) //True
-
-word[4] b = w + 'd'; //'abcd'; flush fill
-
-word[4] c = w + ['d'] // ['abc', 'd']; padded fill
-
-v[0] //'abc'
-
-w[0] //'a'
-
-word f = 3 * word(z); //'rrr'
-
-word[3] e = 3 * [word(z)] //['r', 'r', 'r']
-
-bit[54] d = z * 3
+Float64: 12.35...
