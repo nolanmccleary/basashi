@@ -13,7 +13,7 @@ Key rules:
 
 6. Adding rings together: Can only add rings of the same type, explicit casts must be made when adding two rings of different types, cast depends on target type. + operator by default concatenates rings togetether while * replicates across some range dictated by the non-ring term (see 8.)
 
-7. Adding literals: Literals can be added to both words and bitfileds provided they fit within the valid range of values. Like in 1., literals can be added in either a padded or unpadded manner e.g. 'abc' vs ['a', 'b', 'c'] (chars via utf-8).
+7. Adding literals: Literals can be added to both words and bitfileds provided they fit within the valid range of values. Like in 1., literals can be added in either a padded or unpadded manner e.g. 'abc' vs ['a', 'b', 'c'] (chars via bytes).
 
 8. Multiplication by constants: new rings can be created by multiplying rings by some numeric constant e.g. a literal or int(<word>), distributive property holds e.g. d = c(a + b) = ca + cb. All sizing must be appropriate.
 
@@ -33,7 +33,7 @@ Mut is only possible for normal words and bitfields, not literals or function po
 
 15. Function syntax: func my_func -> word[3] {...} returns a word[3] value. my_func itself is a word*. Function pointers cannot be mutated and neither can their internal variables. This is checked by the compiler.
 
-16. loop syntax same as C e.g. for(word i = 0; i < 69; i++). However, it will convert to the actual functional implementation of that logic under the hood i.e. it won't actually modify i in place.
+16. loop syntax same as C e.g. for(word i = 0; i < 69; i++)
 
 17. Everything is little-endian by default.
 
@@ -86,12 +86,26 @@ A system-level runtime that an intelligent system can internally represent and r
 Bitwise Sizing:
 Bitfields: 1xn where n is number of bits
 Word: 64xn where n is number of words
-Utf-8 Literals: (n UTF-8 Bytes) * 8
+bytes Literals: (n bytes Bytes) * 8
 
 
 Literal formats (unpadded form shown):
-UTF-8: 'DEAD_BEEF'
+bytes: 'DEAD_BEEF'
 Hex: 0xFF5
 Binary: 3'b101
 Decimal: 12345
 Float64: 12.35...
+
+
+Overwrite refactor (if anything here contradicts with what was said before, ignore the ealier writing (too lazy to rewrite)):
+
+1. ints, uints, strings, and floats declared explicitly: int<bits, wrap|trap|sat>, uint<nbits, wrap|trap|sat>, string<nbytes>, float<64, trap|quiet, nearest|toward0|+inf|-inf>. They are just ring wrapper that specify how +, -, *, /, print operate and whether the operator is valid or not. 
+2. + - etc now used instead of add_int, sub_int etc
+3. All concat performed by [] brackets i.e. c = [a, b]; * aplied on brackets for replication i.e. cc = 5*[c]. a *[b] for exmaple binds tighter than higher concats. [] is inherently a concat operator. Padding specifics are handled by the type being concatenated i.e. bitfileds won't zero-pad, words will zero-pad. As before, all rings must be of the same primary type i.e. words or bits. 
+4. Afine mutability rework with pointers as explicit word wrapper i.e. Ptr<int, mut> a = &b; (read and write), Ptr<Ptr<int, mut>, imm> aa = &a; (read only)
+5. structs via struct {<pad_spec>, a, b, c, &F}. Same as [] but more control over padding between members and allow you to access member by name. Members are now stored as bitfield + range + key internally. bits<M> k = s if size(s) == M else trap.
+6. struct member functions invoked via s.F(args). if parentheses are present, it is a method invocatio, otherwise it is a field access. 
+7. Cross-width arithmetic. Equal widths or explicit cast only. 
+8.  Precedence, [] -> */ -> +-
+9. No mut aliasing: Only one mutable pointer to a given object
+10. Errors: Div by zero, shifts > width etc cast trap unless otherwise specified.
